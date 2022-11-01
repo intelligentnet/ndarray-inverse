@@ -49,7 +49,7 @@ where
         let det = determinant(self);
         if !det.is_zero() {
             match l {
-                1 => Some(array![[1.0 / self[(0, 0)]]),
+                1 => Some(array![[T::one() / self[(0, 0)]]]),
                 2 => Some(array![
                     [self[(1, 1)] / det, -self[(0, 1)] / det],
                     [-self[(1, 0)] / det, self[(0, 0)] / det],
