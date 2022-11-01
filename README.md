@@ -9,7 +9,7 @@ If your priority is ease of installation, pure Rust and portability then this mi
 
 Simple reference with:
 ```
-use ndarray-inverse::Inverse;
+use ndarray_inverse::Inverse;
 ```
 
 Add a cargo dependency too:
