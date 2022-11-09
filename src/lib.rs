@@ -23,29 +23,22 @@ where
     fn inv(&self) -> Option<Self> {
         fn submat<T: Float>(m: &Array2<T>, sr: usize, sc: usize) -> Array2<T> {
             let s = m.raw_dim();
-            let l = s[0] - 1; // must be square matrix
-            let mut result: Array2<T> = Array2::zeros((l, l));
+            assert!(s[0] == s[1]);
+            let l = s[0] - 1;
             let mut values: Vec<T> = vec![T::zero(); l * l];
             let mut i: usize = 0;
-            for r in 0..s[0] {
-                for c in 0..s[1] {
-                    if r != sr && c != sc {
-                        values[i] = m[(r, c)];
-                        i += 1;
-                    }
-                }
-            }
-            let mut i: usize = 0;
-            for r in 0..l {
-                for c in 0..l {
-                    result[(r, c)] = values[i];
+            (0..s[0]).for_each(|r| (0..s[1]).for_each(|c| {
+                if r != sr && c != sc {
+                    values[i] = m[(r, c)];
                     i += 1;
                 }
-            }
-            result
+            }));
+            Array2::from_shape_vec((l, l), values).unwrap()
         }
 
-        let l = self.raw_dim()[0];
+        let s = self.raw_dim();
+        assert!(s[0] == s[1]);
+        let l = s[0];
         let det = determinant(self);
         if !det.is_zero() {
             match l {
@@ -109,9 +102,11 @@ where
                 _ => {
                     // Fully expanding any more is too clunky!
                     let s = self.raw_dim();
+                    assert!(s[0] == s[1]);
                     let l = s[0];
                     if !det.is_zero() {
                         let mut cofactors: Array2<T> = Array2::zeros((l, l));
+                        //let mut cofactors = unsafe { Array2::<T>::uninitialized((l, l)) };
                         for i in 0..l {
                             for j in 0..l {
                                 let d = determinant(&submat(self, i, j));
@@ -130,261 +125,258 @@ where
     }
 }
 
-fn determinant<T: Float + Debug + ScalarOperand + Sum>(m: &Array2<T>) -> T {
-    fn determinant<T>(m: &Array2<T>) -> T
-    where
-        T: Debug + Copy + Zero + One + Mul + Sub<Output = T> + Neg<Output = T> + Sum<T>,
-    {
-        fn minor<T: Copy + Zero>(m: &Array2<T>, x: usize, y: usize) -> Array2<T> {
-            let s = m.raw_dim();
-            let l = s[0];
-            let mut res = Array2::<T>::zeros((l - 1, l - 1));
-            for r in 0..l - 1 {
-                for c in 0..l - 1 {
-                    res[(r, c)] = if r < x {
-                        if c < y {
-                            m[(r, c)]
-                        } else {
-                            m[(r, c + 1)]
-                        }
-                    } else if c < y {
-                        m[(r + 1, c)]
-                    } else {
-                        m[(r + 1, c + 1)]
-                    };
-                }
-            }
-            res
-        }
-
+fn determinant<T>(m: &Array2<T>) -> T
+where
+    T: Copy + Zero + One + Mul + Sub<Output=T> + Neg<Output=T> + Sum<T>,
+{
+    fn minor<T: Copy + Zero>(m: &Array2<T>, x: usize, y: usize) -> Array2<T> {
         let l = m.raw_dim()[0];
-        // Fully expanding the first few determinants makes a big
-        // difference, especially as the generic algorithm is recursive
-        match l {
-            1 => m[(0, 0)],
-            2 => m[(0, 0)] * m[(1, 1)] - m[(1, 0)] * m[(0, 1)],
-            3 => {
-                let m00 = m[(0, 0)];
-                let m01 = m[(0, 1)];
-                let m02 = m[(0, 2)];
-                let m10 = m[(1, 0)];
-                let m11 = m[(1, 1)];
-                let m12 = m[(1, 2)];
-                let m20 = m[(2, 0)];
-                let m21 = m[(2, 1)];
-                let m22 = m[(2, 2)];
-
-                m00 * (m11 * m22 - m21 * m12) - m01 * (m10 * m22 - m12 * m20)
-                    + m02 * (m10 * m21 - m11 * m20)
-            }
-            4 => {
-                let m00 = m[(0, 0)];
-                let m01 = m[(0, 1)];
-                let m02 = m[(0, 2)];
-                let m03 = m[(0, 3)];
-                let m10 = m[(1, 0)];
-                let m11 = m[(1, 1)];
-                let m12 = m[(1, 2)];
-                let m13 = m[(1, 3)];
-                let m20 = m[(2, 0)];
-                let m21 = m[(2, 1)];
-                let m22 = m[(2, 2)];
-                let m23 = m[(2, 3)];
-                let m30 = m[(3, 0)];
-                let m31 = m[(3, 1)];
-                let m32 = m[(3, 2)];
-                let m33 = m[(3, 3)];
-
-                m00 * m21 * m32 * m13 - m00 * m21 * m33 * m12 - m00 * m22 * m31 * m13
-                    + m00 * m22 * m33 * m11
-                    + m00 * m23 * m31 * m12
-                    - m00 * m23 * m32 * m11
-                    - m21 * m30 * m02 * m13
-                    + m21 * m30 * m03 * m12
-                    - m21 * m32 * m03 * m10
-                    + m21 * m33 * m02 * m10
-                    + m22 * m30 * m01 * m13
-                    - m22 * m30 * m03 * m11
-                    + m22 * m31 * m03 * m10
-                    - m22 * m33 * m01 * m10
-                    - m23 * m30 * m01 * m12
-                    + m23 * m30 * m02 * m11
-                    - m23 * m31 * m02 * m10
-                    + m23 * m32 * m01 * m10
-                    + m31 * m02 * m13 * m20
-                    - m31 * m03 * m12 * m20
-                    - m32 * m01 * m13 * m20
-                    + m32 * m03 * m11 * m20
-                    + m33 * m01 * m12 * m20
-                    - m33 * m02 * m11 * m20
-            }
-            5 => {
-                // Okay, getting unweldy but worth it
-                let m00 = m[(0, 0)];
-                let m01 = m[(0, 1)];
-                let m02 = m[(0, 2)];
-                let m03 = m[(0, 3)];
-                let m04 = m[(0, 4)];
-                let m10 = m[(1, 0)];
-                let m11 = m[(1, 1)];
-                let m12 = m[(1, 2)];
-                let m13 = m[(1, 3)];
-                let m14 = m[(1, 4)];
-                let m20 = m[(2, 0)];
-                let m21 = m[(2, 1)];
-                let m22 = m[(2, 2)];
-                let m23 = m[(2, 3)];
-                let m24 = m[(2, 4)];
-                let m30 = m[(3, 0)];
-                let m31 = m[(3, 1)];
-                let m32 = m[(3, 2)];
-                let m33 = m[(3, 3)];
-                let m34 = m[(3, 4)];
-                let m40 = m[(4, 0)];
-                let m41 = m[(4, 1)];
-                let m42 = m[(4, 2)];
-                let m43 = m[(4, 3)];
-                let m44 = m[(4, 4)];
-
-                m00 * m11 * m22 * m33 * m44
-                    - m00 * m11 * m22 * m34 * m43
-                    - m00 * m11 * m23 * m32 * m44
-                    + m00 * m11 * m23 * m34 * m42
-                    + m00 * m11 * m24 * m32 * m43
-                    - m00 * m11 * m24 * m33 * m42
-                    - m00 * m12 * m21 * m33 * m44
-                    + m00 * m12 * m21 * m34 * m43
-                    + m00 * m12 * m23 * m31 * m44
-                    - m00 * m12 * m23 * m34 * m41
-                    - m00 * m12 * m24 * m31 * m43
-                    + m00 * m12 * m24 * m33 * m41
-                    + m00 * m13 * m21 * m32 * m44
-                    - m00 * m13 * m21 * m34 * m42
-                    - m00 * m13 * m22 * m31 * m44
-                    + m00 * m13 * m22 * m34 * m41
-                    + m00 * m13 * m24 * m31 * m42
-                    - m00 * m13 * m24 * m32 * m41
-                    - m00 * m14 * m21 * m32 * m43
-                    + m00 * m14 * m21 * m33 * m42
-                    + m00 * m14 * m22 * m31 * m43
-                    - m00 * m14 * m22 * m33 * m41
-                    - m00 * m14 * m23 * m31 * m42
-                    + m00 * m14 * m23 * m32 * m41
-                    - m01 * m10 * m22 * m33 * m44
-                    + m01 * m10 * m22 * m34 * m43
-                    + m01 * m10 * m23 * m32 * m44
-                    - m01 * m10 * m23 * m34 * m42
-                    - m01 * m10 * m24 * m32 * m43
-                    + m01 * m10 * m24 * m33 * m42
-                    + m01 * m12 * m20 * m33 * m44
-                    - m01 * m12 * m20 * m34 * m43
-                    - m01 * m12 * m23 * m30 * m44
-                    + m01 * m12 * m23 * m34 * m40
-                    + m01 * m12 * m24 * m30 * m43
-                    - m01 * m12 * m24 * m33 * m40
-                    - m01 * m13 * m20 * m32 * m44
-                    + m01 * m13 * m20 * m34 * m42
-                    + m01 * m13 * m22 * m30 * m44
-                    - m01 * m13 * m22 * m34 * m40
-                    - m01 * m13 * m24 * m30 * m42
-                    + m01 * m13 * m24 * m32 * m40
-                    + m01 * m14 * m20 * m32 * m43
-                    - m01 * m14 * m20 * m33 * m42
-                    - m01 * m14 * m22 * m30 * m43
-                    + m01 * m14 * m22 * m33 * m40
-                    + m01 * m14 * m23 * m30 * m42
-                    - m01 * m14 * m23 * m32 * m40
-                    + m02 * m10 * m21 * m33 * m44
-                    - m02 * m10 * m21 * m34 * m43
-                    - m02 * m10 * m23 * m31 * m44
-                    + m02 * m10 * m23 * m34 * m41
-                    + m02 * m10 * m24 * m31 * m43
-                    - m02 * m10 * m24 * m33 * m41
-                    - m02 * m11 * m20 * m33 * m44
-                    + m02 * m11 * m20 * m34 * m43
-                    + m02 * m11 * m23 * m30 * m44
-                    - m02 * m11 * m23 * m34 * m40
-                    - m02 * m11 * m24 * m30 * m43
-                    + m02 * m11 * m24 * m33 * m40
-                    + m02 * m13 * m20 * m31 * m44
-                    - m02 * m13 * m20 * m34 * m41
-                    - m02 * m13 * m21 * m30 * m44
-                    + m02 * m13 * m21 * m34 * m40
-                    + m02 * m13 * m24 * m30 * m41
-                    - m02 * m13 * m24 * m31 * m40
-                    - m02 * m14 * m20 * m31 * m43
-                    + m02 * m14 * m20 * m33 * m41
-                    + m02 * m14 * m21 * m30 * m43
-                    - m02 * m14 * m21 * m33 * m40
-                    - m02 * m14 * m23 * m30 * m41
-                    + m02 * m14 * m23 * m31 * m40
-                    - m03 * m10 * m21 * m32 * m44
-                    + m03 * m10 * m21 * m34 * m42
-                    + m03 * m10 * m22 * m31 * m44
-                    - m03 * m10 * m22 * m34 * m41
-                    - m03 * m10 * m24 * m31 * m42
-                    + m03 * m10 * m24 * m32 * m41
-                    + m03 * m11 * m20 * m32 * m44
-                    - m03 * m11 * m20 * m34 * m42
-                    - m03 * m11 * m22 * m30 * m44
-                    + m03 * m11 * m22 * m34 * m40
-                    + m03 * m11 * m24 * m30 * m42
-                    - m03 * m11 * m24 * m32 * m40
-                    - m03 * m12 * m20 * m31 * m44
-                    + m03 * m12 * m20 * m34 * m41
-                    + m03 * m12 * m21 * m30 * m44
-                    - m03 * m12 * m21 * m34 * m40
-                    - m03 * m12 * m24 * m30 * m41
-                    + m03 * m12 * m24 * m31 * m40
-                    + m03 * m14 * m20 * m31 * m42
-                    - m03 * m14 * m20 * m32 * m41
-                    - m03 * m14 * m21 * m30 * m42
-                    + m03 * m14 * m21 * m32 * m40
-                    + m03 * m14 * m22 * m30 * m41
-                    - m03 * m14 * m22 * m31 * m40
-                    + m04 * m10 * m21 * m32 * m43
-                    - m04 * m10 * m21 * m33 * m42
-                    - m04 * m10 * m22 * m31 * m43
-                    + m04 * m10 * m22 * m33 * m41
-                    + m04 * m10 * m23 * m31 * m42
-                    - m04 * m10 * m23 * m32 * m41
-                    - m04 * m11 * m20 * m32 * m43
-                    + m04 * m11 * m20 * m33 * m42
-                    + m04 * m11 * m22 * m30 * m43
-                    - m04 * m11 * m22 * m33 * m40
-                    - m04 * m11 * m23 * m30 * m42
-                    + m04 * m11 * m23 * m32 * m40
-                    + m04 * m12 * m20 * m31 * m43
-                    - m04 * m12 * m20 * m33 * m41
-                    - m04 * m12 * m21 * m30 * m43
-                    + m04 * m12 * m21 * m33 * m40
-                    + m04 * m12 * m23 * m30 * m41
-                    - m04 * m12 * m23 * m31 * m40
-                    - m04 * m13 * m20 * m31 * m42
-                    + m04 * m13 * m20 * m32 * m41
-                    + m04 * m13 * m21 * m30 * m42
-                    - m04 * m13 * m21 * m32 * m40
-                    - m04 * m13 * m22 * m30 * m41
-                    + m04 * m13 * m22 * m31 * m40
-            }
-            _ =>
-            // Now do it the traditional way
-            {
-                (0..l)
-                    .map(|i| {
-                        let v = m[(0, i)] * determinant(&minor(m, 0, i));
-                        if (i % 2) == 0 {
-                            v
-                        } else {
-                            -v
-                        }
-                    })
-                    .sum::<T>()
+        // Must be a faster way
+        let mut res = Array2::<T>::zeros((l - 1, l - 1));
+        //let mut res = unsafe { Array2::<T>::uninitialized((l - 1, l - 1)) };
+        for r in 0..l - 1 {
+            for c in 0..l - 1 {
+                res[(r, c)] = if r < x {
+                    if c < y {
+                        m[(r, c)]
+                    } else {
+                        m[(r, c + 1)]
+                    }
+                } else if c < y {
+                    m[(r + 1, c)]
+                } else {
+                    m[(r + 1, c + 1)]
+                };
             }
         }
+        res
     }
 
-    determinant(m)
+    let l = m.raw_dim()[0];
+    // Fully expanding the first few determinants makes a big
+    // difference, especially as the generic algorithm is recursive
+    match l {
+        1 => m[(0, 0)],
+        2 => m[(0, 0)] * m[(1, 1)] - m[(1, 0)] * m[(0, 1)],
+        3 => {
+            let m00 = m[(0, 0)];
+            let m01 = m[(0, 1)];
+            let m02 = m[(0, 2)];
+            let m10 = m[(1, 0)];
+            let m11 = m[(1, 1)];
+            let m12 = m[(1, 2)];
+            let m20 = m[(2, 0)];
+            let m21 = m[(2, 1)];
+            let m22 = m[(2, 2)];
+
+            m00 * (m11 * m22 - m21 * m12) - m01 * (m10 * m22 - m12 * m20)
+                + m02 * (m10 * m21 - m11 * m20)
+        }
+        4 => {
+            let m00 = m[(0, 0)];
+            let m01 = m[(0, 1)];
+            let m02 = m[(0, 2)];
+            let m03 = m[(0, 3)];
+            let m10 = m[(1, 0)];
+            let m11 = m[(1, 1)];
+            let m12 = m[(1, 2)];
+            let m13 = m[(1, 3)];
+            let m20 = m[(2, 0)];
+            let m21 = m[(2, 1)];
+            let m22 = m[(2, 2)];
+            let m23 = m[(2, 3)];
+            let m30 = m[(3, 0)];
+            let m31 = m[(3, 1)];
+            let m32 = m[(3, 2)];
+            let m33 = m[(3, 3)];
+
+            m00 * m21 * m32 * m13 - m00 * m21 * m33 * m12 - m00 * m22 * m31 * m13
+                + m00 * m22 * m33 * m11
+                + m00 * m23 * m31 * m12
+                - m00 * m23 * m32 * m11
+                - m21 * m30 * m02 * m13
+                + m21 * m30 * m03 * m12
+                - m21 * m32 * m03 * m10
+                + m21 * m33 * m02 * m10
+                + m22 * m30 * m01 * m13
+                - m22 * m30 * m03 * m11
+                + m22 * m31 * m03 * m10
+                - m22 * m33 * m01 * m10
+                - m23 * m30 * m01 * m12
+                + m23 * m30 * m02 * m11
+                - m23 * m31 * m02 * m10
+                + m23 * m32 * m01 * m10
+                + m31 * m02 * m13 * m20
+                - m31 * m03 * m12 * m20
+                - m32 * m01 * m13 * m20
+                + m32 * m03 * m11 * m20
+                + m33 * m01 * m12 * m20
+                - m33 * m02 * m11 * m20
+        }
+        5 => {
+            // Okay, getting unweldy but worth it
+            let m00 = m[(0, 0)];
+            let m01 = m[(0, 1)];
+            let m02 = m[(0, 2)];
+            let m03 = m[(0, 3)];
+            let m04 = m[(0, 4)];
+            let m10 = m[(1, 0)];
+            let m11 = m[(1, 1)];
+            let m12 = m[(1, 2)];
+            let m13 = m[(1, 3)];
+            let m14 = m[(1, 4)];
+            let m20 = m[(2, 0)];
+            let m21 = m[(2, 1)];
+            let m22 = m[(2, 2)];
+            let m23 = m[(2, 3)];
+            let m24 = m[(2, 4)];
+            let m30 = m[(3, 0)];
+            let m31 = m[(3, 1)];
+            let m32 = m[(3, 2)];
+            let m33 = m[(3, 3)];
+            let m34 = m[(3, 4)];
+            let m40 = m[(4, 0)];
+            let m41 = m[(4, 1)];
+            let m42 = m[(4, 2)];
+            let m43 = m[(4, 3)];
+            let m44 = m[(4, 4)];
+
+            m00 * m11 * m22 * m33 * m44
+                - m00 * m11 * m22 * m34 * m43
+                - m00 * m11 * m23 * m32 * m44
+                + m00 * m11 * m23 * m34 * m42
+                + m00 * m11 * m24 * m32 * m43
+                - m00 * m11 * m24 * m33 * m42
+                - m00 * m12 * m21 * m33 * m44
+                + m00 * m12 * m21 * m34 * m43
+                + m00 * m12 * m23 * m31 * m44
+                - m00 * m12 * m23 * m34 * m41
+                - m00 * m12 * m24 * m31 * m43
+                + m00 * m12 * m24 * m33 * m41
+                + m00 * m13 * m21 * m32 * m44
+                - m00 * m13 * m21 * m34 * m42
+                - m00 * m13 * m22 * m31 * m44
+                + m00 * m13 * m22 * m34 * m41
+                + m00 * m13 * m24 * m31 * m42
+                - m00 * m13 * m24 * m32 * m41
+                - m00 * m14 * m21 * m32 * m43
+                + m00 * m14 * m21 * m33 * m42
+                + m00 * m14 * m22 * m31 * m43
+                - m00 * m14 * m22 * m33 * m41
+                - m00 * m14 * m23 * m31 * m42
+                + m00 * m14 * m23 * m32 * m41
+                - m01 * m10 * m22 * m33 * m44
+                + m01 * m10 * m22 * m34 * m43
+                + m01 * m10 * m23 * m32 * m44
+                - m01 * m10 * m23 * m34 * m42
+                - m01 * m10 * m24 * m32 * m43
+                + m01 * m10 * m24 * m33 * m42
+                + m01 * m12 * m20 * m33 * m44
+                - m01 * m12 * m20 * m34 * m43
+                - m01 * m12 * m23 * m30 * m44
+                + m01 * m12 * m23 * m34 * m40
+                + m01 * m12 * m24 * m30 * m43
+                - m01 * m12 * m24 * m33 * m40
+                - m01 * m13 * m20 * m32 * m44
+                + m01 * m13 * m20 * m34 * m42
+                + m01 * m13 * m22 * m30 * m44
+                - m01 * m13 * m22 * m34 * m40
+                - m01 * m13 * m24 * m30 * m42
+                + m01 * m13 * m24 * m32 * m40
+                + m01 * m14 * m20 * m32 * m43
+                - m01 * m14 * m20 * m33 * m42
+                - m01 * m14 * m22 * m30 * m43
+                + m01 * m14 * m22 * m33 * m40
+                + m01 * m14 * m23 * m30 * m42
+                - m01 * m14 * m23 * m32 * m40
+                + m02 * m10 * m21 * m33 * m44
+                - m02 * m10 * m21 * m34 * m43
+                - m02 * m10 * m23 * m31 * m44
+                + m02 * m10 * m23 * m34 * m41
+                + m02 * m10 * m24 * m31 * m43
+                - m02 * m10 * m24 * m33 * m41
+                - m02 * m11 * m20 * m33 * m44
+                + m02 * m11 * m20 * m34 * m43
+                + m02 * m11 * m23 * m30 * m44
+                - m02 * m11 * m23 * m34 * m40
+                - m02 * m11 * m24 * m30 * m43
+                + m02 * m11 * m24 * m33 * m40
+                + m02 * m13 * m20 * m31 * m44
+                - m02 * m13 * m20 * m34 * m41
+                - m02 * m13 * m21 * m30 * m44
+                + m02 * m13 * m21 * m34 * m40
+                + m02 * m13 * m24 * m30 * m41
+                - m02 * m13 * m24 * m31 * m40
+                - m02 * m14 * m20 * m31 * m43
+                + m02 * m14 * m20 * m33 * m41
+                + m02 * m14 * m21 * m30 * m43
+                - m02 * m14 * m21 * m33 * m40
+                - m02 * m14 * m23 * m30 * m41
+                + m02 * m14 * m23 * m31 * m40
+                - m03 * m10 * m21 * m32 * m44
+                + m03 * m10 * m21 * m34 * m42
+                + m03 * m10 * m22 * m31 * m44
+                - m03 * m10 * m22 * m34 * m41
+                - m03 * m10 * m24 * m31 * m42
+                + m03 * m10 * m24 * m32 * m41
+                + m03 * m11 * m20 * m32 * m44
+                - m03 * m11 * m20 * m34 * m42
+                - m03 * m11 * m22 * m30 * m44
+                + m03 * m11 * m22 * m34 * m40
+                + m03 * m11 * m24 * m30 * m42
+                - m03 * m11 * m24 * m32 * m40
+                - m03 * m12 * m20 * m31 * m44
+                + m03 * m12 * m20 * m34 * m41
+                + m03 * m12 * m21 * m30 * m44
+                - m03 * m12 * m21 * m34 * m40
+                - m03 * m12 * m24 * m30 * m41
+                + m03 * m12 * m24 * m31 * m40
+                + m03 * m14 * m20 * m31 * m42
+                - m03 * m14 * m20 * m32 * m41
+                - m03 * m14 * m21 * m30 * m42
+                + m03 * m14 * m21 * m32 * m40
+                + m03 * m14 * m22 * m30 * m41
+                - m03 * m14 * m22 * m31 * m40
+                + m04 * m10 * m21 * m32 * m43
+                - m04 * m10 * m21 * m33 * m42
+                - m04 * m10 * m22 * m31 * m43
+                + m04 * m10 * m22 * m33 * m41
+                + m04 * m10 * m23 * m31 * m42
+                - m04 * m10 * m23 * m32 * m41
+                - m04 * m11 * m20 * m32 * m43
+                + m04 * m11 * m20 * m33 * m42
+                + m04 * m11 * m22 * m30 * m43
+                - m04 * m11 * m22 * m33 * m40
+                - m04 * m11 * m23 * m30 * m42
+                + m04 * m11 * m23 * m32 * m40
+                + m04 * m12 * m20 * m31 * m43
+                - m04 * m12 * m20 * m33 * m41
+                - m04 * m12 * m21 * m30 * m43
+                + m04 * m12 * m21 * m33 * m40
+                + m04 * m12 * m23 * m30 * m41
+                - m04 * m12 * m23 * m31 * m40
+                - m04 * m13 * m20 * m31 * m42
+                + m04 * m13 * m20 * m32 * m41
+                + m04 * m13 * m21 * m30 * m42
+                - m04 * m13 * m21 * m32 * m40
+                - m04 * m13 * m22 * m30 * m41
+                + m04 * m13 * m22 * m31 * m40
+        }
+        _ =>
+        // Now do it the traditional way
+        {
+            (0..l)
+                .map(|i| {
+                    let v = m[(0, i)] * determinant(&minor(m, 0, i));
+                    if (i % 2) == 0 {
+                        v
+                    } else {
+                        -v
+                    }
+                })
+                .sum::<T>()
+        }
+    }
 }
 
 #[cfg(test)]
