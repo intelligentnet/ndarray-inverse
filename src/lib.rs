@@ -21,19 +21,18 @@ where
     }
 
     fn inv(&self) -> Option<Self> {
-        fn submat<T: Float>(m: &Array2<T>, sr: usize, sc: usize) -> Array2<T> {
+        fn submat<'a, T: Float>(res: &'a mut Vec<T>, m: &'a Array2<T>, sr: usize, sc: usize) {
             let s = m.raw_dim();
-            assert!(s[0] == s[1]);
-            let l = s[0] - 1;
-            let mut values: Vec<T> = vec![T::zero(); l * l];
+            //let l = s[0] - 1;
             let mut i: usize = 0;
             (0..s[0]).for_each(|r| (0..s[1]).for_each(|c| {
                 if r != sr && c != sc {
-                    values[i] = m[(r, c)];
+                    res[i] = m[(r, c)];
                     i += 1;
                 }
             }));
-            Array2::from_shape_vec((l, l), values).unwrap()
+            //(i..l*l).for_each(|i| res[i] = T::zero()); // must fill rest with 0
+            // Note: to stop copy we do not return anything.
         }
 
         let s = self.raw_dim();
@@ -42,7 +41,7 @@ where
         let det = determinant(self);
         if !det.is_zero() {
             match l {
-                1 => Some(array![[T::one() / self[(0, 0)]]]),
+                1 => Some(array![[self[(0, 0)].recip()]]),
                 2 => Some(array![
                     [self[(1, 1)] / det, -self[(0, 1)] / det],
                     [-self[(1, 0)] / det, self[(0, 0)] / det],
@@ -73,43 +72,16 @@ where
                         [x20 / det, x21 / det, x22 / det]
                     ])
                 }
-                4 => {
-                    // Not a big improvement! No more
-                    let x00 = determinant(&submat(self, 0, 0));
-                    let x01 = -determinant(&submat(self, 1, 0));
-                    let x02 = determinant(&submat(self, 2, 0));
-                    let x03 = -determinant(&submat(self, 3, 0));
-                    let x10 = -determinant(&submat(self, 0, 1));
-                    let x11 = determinant(&submat(self, 1, 1));
-                    let x12 = -determinant(&submat(self, 2, 1));
-                    let x13 = determinant(&submat(self, 3, 1));
-                    let x20 = determinant(&submat(self, 0, 2));
-                    let x21 = -determinant(&submat(self, 1, 2));
-                    let x22 = determinant(&submat(self, 2, 2));
-                    let x23 = -determinant(&submat(self, 3, 2));
-                    let x30 = -determinant(&submat(self, 0, 3));
-                    let x31 = determinant(&submat(self, 1, 3));
-                    let x32 = -determinant(&submat(self, 2, 3));
-                    let x33 = determinant(&submat(self, 3, 3));
-
-                    Some(array![
-                        [x00 / det, x01 / det, x02 / det, x03 / det],
-                        [x10 / det, x11 / det, x12 / det, x13 / det],
-                        [x20 / det, x21 / det, x22 / det, x23 / det],
-                        [x30 / det, x31 / det, x32 / det, x33 / det]
-                    ])
-                }
                 _ => {
                     // Fully expanding any more is too clunky!
-                    let s = self.raw_dim();
-                    assert!(s[0] == s[1]);
-                    let l = s[0];
                     if !det.is_zero() {
                         let mut cofactors: Array2<T> = Array2::zeros((l, l));
-                        //let mut cofactors = unsafe { Array2::<T>::uninitialized((l, l)) };
+                        let mut res: Vec<T> = vec![T::zero(); (l - 1) * (l - 1)];
                         for i in 0..l {
                             for j in 0..l {
-                                let d = determinant(&submat(self, i, j));
+                                submat(&mut res, self, i, j);
+                                let sm: Array2<T> = unsafe { Array2::from_shape_vec_unchecked((l - 1, l - 1), res.to_vec()) };
+                                let d = determinant(&sm);
                                 cofactors[(j, i)] = if ((i + j) % 2) == 0 { d } else { -d };
                             }
                         }
@@ -129,11 +101,8 @@ fn determinant<T>(m: &Array2<T>) -> T
 where
     T: Copy + Zero + One + Mul + Sub<Output=T> + Neg<Output=T> + Sum<T>,
 {
-    fn minor<T: Copy + Zero>(m: &Array2<T>, x: usize, y: usize) -> Array2<T> {
+    fn minor<'a, T: Copy + Zero>(res: &'a mut Array2<T>, m: &'a Array2<T>, x: usize, y: usize) {
         let l = m.raw_dim()[0];
-        // Must be a faster way
-        let mut res = Array2::<T>::zeros((l - 1, l - 1));
-        //let mut res = unsafe { Array2::<T>::uninitialized((l - 1, l - 1)) };
         for r in 0..l - 1 {
             for c in 0..l - 1 {
                 res[(r, c)] = if r < x {
@@ -149,7 +118,7 @@ where
                 };
             }
         }
-        res
+        //res
     }
 
     let l = m.raw_dim()[0];
@@ -365,9 +334,12 @@ where
         _ =>
         // Now do it the traditional way
         {
+            // Reuseable result to reduce memory allocations
+            let mut res = Array2::<T>::zeros((l - 1, l - 1));
             (0..l)
                 .map(|i| {
-                    let v = m[(0, i)] * determinant(&minor(m, 0, i));
+                    minor(&mut res, m, 0, i);
+                    let v = m[(0, i)] * determinant(&res);
                     if (i % 2) == 0 {
                         v
                     } else {
@@ -399,6 +371,16 @@ mod test_inverse {
             .zip(to_vec(v2))
             .map(|(a, b)| Float::abs(a.abs() - b.abs()) < epsilon)
             .all(|b| b)
+    }
+
+    #[test]
+    fn test_1x1() {
+        let a: Array2<f64> = array![[2.0]];
+        let inv = a.inv().expect("Sods Law");
+        let back = inv.inv();
+        assert!(compare_vecs(&a, &back.unwrap(), EPS));
+        let expected = array![[0.5]];
+        assert!(compare_vecs(&inv, &expected, EPS));
     }
 
     #[test]
