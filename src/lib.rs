@@ -21,9 +21,9 @@ where
     }
 
     fn inv(&self) -> Option<Self> {
+        // Seems fasster if not inlined!
         fn submat<'a, T: Float>(res: &'a mut Vec<T>, m: &'a Array2<T>, sr: usize, sc: usize) {
             let s = m.raw_dim();
-            //let l = s[0] - 1;
             let mut i: usize = 0;
             (0..s[0]).for_each(|r| (0..s[1]).for_each(|c| {
                 if r != sr && c != sc {
