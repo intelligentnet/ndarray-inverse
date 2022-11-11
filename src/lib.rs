@@ -14,19 +14,20 @@ pub trait Inverse<T: Float> {
 
 impl<T> Inverse<T> for Array2<T>
 where
-    T: Float + Debug + ScalarOperand + Sum<T>,
+    T: Float + Debug + ScalarOperand + Sum<T>
 {
     fn det(&self) -> T {
         let s = self.raw_dim();
         assert!(s[0] == s[1]);
         // Flatten to Vec!
-        let vm: Vec<T> = self.iter().map(|&i| i).collect();
+        //let vm: Vec<T> = self.iter().map(|&i| i).collect();
+        let vm: Vec<T> = self.iter().copied().collect();
         determinant(&vm, s[0])
     }
 
     fn inv(&self) -> Option<Self> {
         // Seems faster if not inlined!
-        fn submat<'a, T: Float>(res: &'a mut Vec<T>, m: &'a Array2<T>, sr: usize, sc: usize) {
+        fn submat<'a, T: Float>(res: &'a mut [T], m: &'a Array2<T>, sr: usize, sc: usize) {
             let s = m.raw_dim();
             let mut i: usize = 0;
             (0..s[0]).for_each(|r| (0..s[1]).for_each(|c| {
@@ -35,7 +36,6 @@ where
                     i += 1;
                 }
             }));
-            // Note: to stop copy we do not return anything. Variable mutated!
         }
 
         let s = self.raw_dim();
@@ -220,6 +220,7 @@ where
                         let mut res: Vec<T> = vec![T::zero(); (l - 1) * (l - 1)];
                         for i in 0..l {
                             for j in 0..l {
+                                // Find submatrix
                                 submat(&mut res, self, i, j);
                                 let d = determinant(&res, l - 1);
                                 cofactors[(j, i)] = if ((i + j) % 2) == 0 { d } else { -d };
@@ -237,7 +238,7 @@ where
     }
 }
 
-fn determinant<T>(vm: &Vec<T>, l: usize) -> T
+fn determinant<T>(vm: &[T], l: usize) -> T
 where
     T: Copy + Zero + One + Mul + Sub<Output=T> + Neg<Output=T> + Sum<T>,
 {
