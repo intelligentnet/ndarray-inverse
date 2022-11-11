@@ -4,7 +4,7 @@ When creating some kalman filter code there was a need for Matrix inversion...
 
 Installing external code to calculate inverses was clunky and painful. Hence
 this little trait. It's 'reasonably' quick for small Matrices, a dedicated
-library, even on a CPU is ~5x faster for bigger Matrices, as you would expect.
+library, even on a CPU is much faster for bigger Matrices, as you would expect.
 Relatively small matrices / infrequent need for inverses are the use case here.
 With huge matrices for Machine Learning, you would be using
 iterative/approximate methods anyway, such as gradient decent. 
