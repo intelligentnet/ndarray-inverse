@@ -10,6 +10,9 @@ pub trait Inverse<T: Float> {
     fn inv(&self) -> Option<Self>
     where
         Self: Sized;
+    fn inv_diag(&self) -> Option<Self>
+    where
+        Self: Sized;
 }
 
 impl<T> Inverse<T> for Array2<T>
@@ -20,7 +23,6 @@ where
         let s = self.raw_dim();
         assert!(s[0] == s[1]);
         // Flatten to Vec!
-        //let vm: Vec<T> = self.iter().map(|&i| i).collect();
         let vm: Vec<T> = self.iter().copied().collect();
         determinant(&vm, s[0])
     }
@@ -236,9 +238,22 @@ where
             None
         }
     }
+
+    fn inv_diag(&self) -> Option<Self> {
+        let s = self.raw_dim();
+        assert!(s[0] == s[1]);
+
+        let mut res: Array2<T> = Array2::zeros(s);
+
+        for i in 0 .. s[0] {
+            res[(i, i)] = self[(i, i)].recip();
+        }
+
+        Some(res)
+    }
 }
 
-fn determinant<T>(vm: &[T], l: usize) -> T
+fn determinant<T>(vm: &Vec<T>, l: usize) -> T
 where
     T: Copy + Zero + One + Mul + Sub<Output=T> + Neg<Output=T> + Sum<T>,
 {
@@ -1222,25 +1237,17 @@ where
         {
             // Reuseable result to reduce memory allocations
             let l1 = l - 1;
-            let mut res: Vec<T> = vec![T::zero(); l1 * l1];
+            let mut res: Vec<T> = vec![T::zero(); l1 * l1]; // Shared
             (0 .. l)
                 .map(|i| {
                     for r in 0 .. l1 {
                         for c in 0 .. l1 {
                             res[r * l1 + c] = 
-                                if c < i {
-                                    vm[(r + 1) * l + c]
-                                } else {
-                                    vm[(r + 1) * l  + (c + 1)]
-                                };
+                                vm[(r + 1) * l + c + (if c < i {0} else {1})];
                         }
                     }
                     let v = vm[i] * determinant(&res, l1);
-                    if (i % 2) == 0 {
-                        v
-                    } else {
-                        -v
-                    }
+                    if (i % 2) == 0 { v } else { -v }
                 })
                 .sum::<T>()
         }
@@ -1452,6 +1459,25 @@ mod test_inverse {
         }
         // Takes about a second on average modern desktop / laptop
         assert!(start.elapsed() < Duration::new(2, 0));
+    }
+
+    #[test]
+    fn test_diag() {
+        let a: Array2<f64> = array![
+            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 10.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 6.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 7.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 9.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.0, 5.0]
+        ];
+        let inv = a.inv_diag().expect("Sods Law");
+        let back = inv.inv_diag();
+        eprintln!("{back:?}");
+        //assert!(compare_vecs(&a, &back.unwrap(), EPS));
+        let expected = a.inv().expect("Sods Law");
+        eprintln!("{expected:?}");
+        assert!(compare_vecs(&inv, &expected, EPS));
     }
     /*
     */
