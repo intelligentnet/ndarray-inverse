@@ -3,21 +3,27 @@ use ndarray::ScalarOperand;
 use num_traits::{Float, One, Zero};
 use std::fmt::Debug;
 use std::iter::Sum;
-use std::ops::{Mul, Neg, Sub};
+use std::ops::{Mul, Neg, Sub, AddAssign};
 
 pub trait Inverse<T: Float> {
     fn det(&self) -> T;
+
     fn inv(&self) -> Option<Self>
     where
         Self: Sized;
+
     fn inv_diag(&self) -> Option<Self>
+    where
+        Self: Sized;
+
+    fn cholesky(&self) -> Self
     where
         Self: Sized;
 }
 
 impl<T> Inverse<T> for Array2<T>
 where
-    T: Float + Debug + ScalarOperand + Sum<T>
+    T: Float + Debug + ScalarOperand + Sum<T> + AddAssign
 {
     fn det(&self) -> T {
         let s = self.raw_dim();
@@ -29,7 +35,7 @@ where
 
     fn inv(&self) -> Option<Self> {
         // Seems faster if not inlined!
-        fn submat<'a, T: Float>(res: &'a mut [T], m: &'a Array2<T>, sr: usize, sc: usize) {
+        fn submat<T: Float>(res: &mut [T], m: &Array2<T>, sr: usize, sc: usize) {
             let s = m.raw_dim();
             let mut i: usize = 0;
             (0..s[0]).for_each(|r| (0..s[1]).for_each(|c| {
@@ -220,12 +226,12 @@ where
                     if !det.is_zero() {
                         let mut cofactors: Array2<T> = Array2::zeros((l, l));
                         let mut res: Vec<T> = vec![T::zero(); (l - 1) * (l - 1)];
-                        for i in 0..l {
-                            for j in 0..l {
+                        for r in 0 .. l {
+                            for c in 0 .. l {
                                 // Find submatrix
-                                submat(&mut res, self, i, j);
+                                submat(&mut res, self, r, c);
                                 let d = determinant(&res, l - 1);
-                                cofactors[(j, i)] = if ((i + j) % 2) == 0 { d } else { -d };
+                                cofactors[(c, r)] = if ((r + c) % 2) == 0 { d } else { -d };
                             }
                         }
                         Some(cofactors / det)
@@ -251,11 +257,36 @@ where
 
         Some(res)
     }
+
+    fn cholesky(&self) -> Self {
+        let s = self.raw_dim();
+        assert!(s[0] == s[1]);
+        let l = s[0];
+        let mut res: Array2<T> = Array2::zeros(s);
+        for i in 0 .. l {
+            for j in 0 ..= i {
+                let mut s = T::zero();
+                for k in 0 .. j {
+                    if !res[(i, k)].is_zero() && !res[(j, k)].is_zero() {
+                        s += res[(i, k)] * res[(j, k)];
+                    }
+                }
+
+                res[(i, j)] = if i == j {
+                    (self[(i, i)] - s).sqrt()
+                } else {
+                    res[(j, j)].recip() * (self[(i, j)] - s)
+                };
+            }
+        }
+
+        res
+    }
 }
 
 fn determinant<T>(vm: &Vec<T>, l: usize) -> T
 where
-    T: Copy + Zero + One + Mul + Sub<Output=T> + Neg<Output=T> + Sum<T>,
+    T: Copy + Debug + Zero + One + Mul + PartialEq + Sub<Output=T> + Neg<Output=T> + Sum<T>,
 {
     // Must be square matrix l x l!
     // Fully expanding the first few determinants makes a big
@@ -1237,17 +1268,24 @@ where
         {
             // Reuseable result to reduce memory allocations
             let l1 = l - 1;
-            let mut res: Vec<T> = vec![T::zero(); l1 * l1]; // Shared
+            let mut res: Vec<T> = vm.clone(); // same shape/size as vm
+            // This is n^3
             (0 .. l)
                 .map(|i| {
-                    for r in 0 .. l1 {
-                        for c in 0 .. l1 {
-                            res[r * l1 + c] = 
-                                vm[(r + 1) * l + c + (if c < i {0} else {1})];
+                    // Makes a modest difference
+                    if !vm[i].is_zero() {
+                        for r in 0 .. l1 {
+                            let d = r * l1;
+                            let s = (r + 1) * l;
+                            for c in 0 .. l1 {
+                                res[d + c] = vm[s + c + if c < i {0} else {1}];
+                            }
                         }
+                        let v = vm[i] * determinant(&res, l1);
+                        if (i % 2) == 0 { v } else { -v }
+                    } else {
+                        T::zero()
                     }
-                    let v = vm[i] * determinant(&res, l1);
-                    if (i % 2) == 0 { v } else { -v }
                 })
                 .sum::<T>()
         }
@@ -1473,12 +1511,37 @@ mod test_inverse {
         ];
         let inv = a.inv_diag().expect("Sods Law");
         let back = inv.inv_diag();
-        eprintln!("{back:?}");
-        //assert!(compare_vecs(&a, &back.unwrap(), EPS));
+        assert!(compare_vecs(&a, &back.unwrap(), EPS));
         let expected = a.inv().expect("Sods Law");
-        eprintln!("{expected:?}");
         assert!(compare_vecs(&inv, &expected, EPS));
     }
-    /*
-    */
+
+    #[test]
+    fn test_cholesky() {
+        let a = array![[25.0, 15.0, -5.0],
+            [15.0, 18.0,  0.0],
+            [-5.0,  0.0, 11.0]];
+
+        let res = a.cholesky();
+
+        let expected = array![[5.0, 0.0, 0.0],
+                              [3.0, 3.0, 0.0],
+                              [-1.0, 1.0, 3.]];
+
+        assert!(compare_vecs(&res, &expected, EPS));
+
+        let a = array![[18.0, 22.0,  54.0,  42.0],
+            [22.0, 70.0,  86.0,  62.0],
+            [54.0, 86.0, 174.0, 134.0],
+            [42.0, 62.0, 134.0, 106.0]];
+
+        let res = a.cholesky();
+
+        let expected = array![[4.242640687119285, 0.0, 0.0, 0.0],
+            [5.185449728701349, 6.565905201197403, 0.0, 0.0],
+            [12.727922061357857, 3.0460384954008553, 1.6497422479090704, 0.0],
+            [9.899494936611667, 1.624553864213788, 1.8497110052313648, 1.3926212476456026]];
+
+        assert!(compare_vecs(&res, &expected, EPS));
+    }
 }
