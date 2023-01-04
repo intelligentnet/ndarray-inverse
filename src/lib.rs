@@ -1,5 +1,6 @@
+#![allow(non_snake_case)]
 use ndarray::prelude::*;
-use ndarray::ScalarOperand;
+use ndarray::{ScalarOperand, Zip};
 use num_traits::{Float, One, Zero};
 use std::fmt::Debug;
 use std::iter::Sum;
@@ -16,7 +17,15 @@ pub trait Inverse<T: Float> {
     where
         Self: Sized;
 
+    fn lu_inv(&self) -> Option<Self>
+    where
+        Self: Sized;
+
     fn cholesky(&self) -> Self
+    where
+        Self: Sized;
+
+    fn lu(&self) -> Option<(Self, Self, Self)>
     where
         Self: Sized;
 }
@@ -49,179 +58,195 @@ where
         let s = self.raw_dim();
         assert!(s[0] == s[1]);
         let l = s[0];
-        let det = self.det();
-        if !det.is_zero() {
-            match l {
-                1 => Some(array![[self[(0, 0)].recip()]]),
-                2 => Some(array![
-                    [self[(1, 1)] / det, -self[(0, 1)] / det],
-                    [-self[(1, 0)] / det, self[(0, 0)] / det],
-                ]),
-                3 => {
-                    let m00 = self[(0, 0)];
-                    let m01 = self[(0, 1)];
-                    let m02 = self[(0, 2)];
-                    let m10 = self[(1, 0)];
-                    let m11 = self[(1, 1)];
-                    let m12 = self[(1, 2)];
-                    let m20 = self[(2, 0)];
-                    let m21 = self[(2, 1)];
-                    let m22 = self[(2, 2)];
+        // check if determinant for shortcut cases only
+        // Note: Cases must match with following main match
+        let det = match l {
+            2 | 3 | 4 => {
+                let d = self.det();
 
-                    let x00 = m11 * m22 - m21 * m12;
-                    let x01 = m02 * m21 - m01 * m22;
-                    let x02 = m01 * m12 - m02 * m11;
-                    let x10 = m12 * m20 - m10 * m22;
-                    let x11 = m00 * m22 - m02 * m20;
-                    let x12 = m10 * m02 - m00 * m12;
-                    let x20 = m10 * m21 - m20 * m11;
-                    let x21 = m20 * m01 - m00 * m21;
-                    let x22 = m00 * m11 - m10 * m01;
-
-                    Some(array![
-                        [x00 / det, x01 / det, x02 / det],
-                        [x10 / det, x11 / det, x12 / det],
-                        [x20 / det, x21 / det, x22 / det]
-                    ])
+                if d.is_zero() {
+                    return None;
+                } else {
+                    d
                 }
-                4 => {
-                    let m00 = self[(0, 0)];
-                    let m01 = self[(0, 1)];
-                    let m02 = self[(0, 2)];
-                    let m03 = self[(0, 3)];
-                    let m10 = self[(1, 0)];
-                    let m11 = self[(1, 1)];
-                    let m12 = self[(1, 2)];
-                    let m13 = self[(1, 3)];
-                    let m20 = self[(2, 0)];
-                    let m21 = self[(2, 1)];
-                    let m22 = self[(2, 2)];
-                    let m23 = self[(2, 3)];
-                    let m30 = self[(3, 0)];
-                    let m31 = self[(3, 1)];
-                    let m32 = self[(3, 2)];
-                    let m33 = self[(3, 3)];
+            },
+            _ => T::zero(),
+        };
+        match l {
+            1 => Some(array![[self[(0, 0)].recip()]]),
+            2 => Some(array![
+                [self[(1, 1)] / det, -self[(0, 1)] / det],
+                [-self[(1, 0)] / det, self[(0, 0)] / det],
+            ]),
+            3 => {
+                let m00 = self[(0, 0)];
+                let m01 = self[(0, 1)];
+                let m02 = self[(0, 2)];
+                let m10 = self[(1, 0)];
+                let m11 = self[(1, 1)];
+                let m12 = self[(1, 2)];
+                let m20 = self[(2, 0)];
+                let m21 = self[(2, 1)];
+                let m22 = self[(2, 2)];
 
-                    let x00 = m11 * m22 * m33
-                        - m11 * m32 * m23
-                        - m12 * m21 * m33
-                        + m12 * m31 * m23
-                        + m13 * m21 * m32
-                        - m13 * m31 * m22;
+                let x00 = m11 * m22 - m21 * m12;
+                let x01 = m02 * m21 - m01 * m22;
+                let x02 = m01 * m12 - m02 * m11;
+                let x10 = m12 * m20 - m10 * m22;
+                let x11 = m00 * m22 - m02 * m20;
+                let x12 = m10 * m02 - m00 * m12;
+                let x20 = m10 * m21 - m20 * m11;
+                let x21 = m20 * m01 - m00 * m21;
+                let x22 = m00 * m11 - m10 * m01;
 
-                    let x10 = -m10 * m22 * m33
-                        + m10 * m32 * m23
-                        + m12 * m20 * m33
-                        - m12 * m30 * m23
-                        - m13 * m20 * m32
-                        + m13 * m30 * m22;
+                Some(array![
+                    [x00 / det, x01 / det, x02 / det],
+                    [x10 / det, x11 / det, x12 / det],
+                    [x20 / det, x21 / det, x22 / det]
+                ])
+            }
+            4 => {
+                let m00 = self[(0, 0)];
+                let m01 = self[(0, 1)];
+                let m02 = self[(0, 2)];
+                let m03 = self[(0, 3)];
+                let m10 = self[(1, 0)];
+                let m11 = self[(1, 1)];
+                let m12 = self[(1, 2)];
+                let m13 = self[(1, 3)];
+                let m20 = self[(2, 0)];
+                let m21 = self[(2, 1)];
+                let m22 = self[(2, 2)];
+                let m23 = self[(2, 3)];
+                let m30 = self[(3, 0)];
+                let m31 = self[(3, 1)];
+                let m32 = self[(3, 2)];
+                let m33 = self[(3, 3)];
 
-                    let x20 = m10 * m21 * m33
-                        - m10 * m31 * m23
-                        - m11 * m20 * m33
-                        + m11 * m30 * m23
-                        + m13 * m20 * m31
-                        - m13 * m30 * m21;
+                let x00 = m11 * m22 * m33
+                    - m11 * m32 * m23
+                    - m12 * m21 * m33
+                    + m12 * m31 * m23
+                    + m13 * m21 * m32
+                    - m13 * m31 * m22;
 
-                    let x30 = -m10 * m21 * m32
-                        + m10 * m31 * m22
-                        + m11 * m20 * m32
-                        - m11 * m30 * m22
-                        - m12 * m20 * m31
-                        + m12 * m30 * m21;
+                let x10 = -m10 * m22 * m33
+                    + m10 * m32 * m23
+                    + m12 * m20 * m33
+                    - m12 * m30 * m23
+                    - m13 * m20 * m32
+                    + m13 * m30 * m22;
 
-                    let x01 = -m01 * m22 * m33
-                        + m01 * m32 * m23
-                        + m02 * m21 * m33
-                        - m02 * m31 * m23
-                        - m03 * m21 * m32
-                        + m03 * m31 * m22;
+                let x20 = m10 * m21 * m33
+                    - m10 * m31 * m23
+                    - m11 * m20 * m33
+                    + m11 * m30 * m23
+                    + m13 * m20 * m31
+                    - m13 * m30 * m21;
 
-                    let x11 = m00 * m22 * m33
-                        - m00 * m32 * m23
-                        - m02 * m20 * m33
-                        + m02 * m30 * m23
-                        + m03 * m20 * m32
-                        - m03 * m30 * m22;
+                let x30 = -m10 * m21 * m32
+                    + m10 * m31 * m22
+                    + m11 * m20 * m32
+                    - m11 * m30 * m22
+                    - m12 * m20 * m31
+                    + m12 * m30 * m21;
 
-                    let x21 = -m00 * m21 * m33
-                        + m00 * m31 * m23
-                        + m01 * m20 * m33
-                        - m01 * m30 * m23
-                        - m03 * m20 * m31
-                        + m03 * m30 * m21;
+                let x01 = -m01 * m22 * m33
+                    + m01 * m32 * m23
+                    + m02 * m21 * m33
+                    - m02 * m31 * m23
+                    - m03 * m21 * m32
+                    + m03 * m31 * m22;
 
-                    let x31 = m00 * m21 * m32
-                        - m00 * m31 * m22
-                        - m01 * m20 * m32
-                        + m01 * m30 * m22
-                        + m02 * m20 * m31
-                        - m02 * m30 * m21;
+                let x11 = m00 * m22 * m33
+                    - m00 * m32 * m23
+                    - m02 * m20 * m33
+                    + m02 * m30 * m23
+                    + m03 * m20 * m32
+                    - m03 * m30 * m22;
 
-                    let x02 = m01 * m12 * m33
-                        - m01 * m32 * m13
-                        - m02 * m11 * m33
-                        + m02 * m31 * m13
-                        + m03 * m11 * m32
-                        - m03 * m31 * m12;
+                let x21 = -m00 * m21 * m33
+                    + m00 * m31 * m23
+                    + m01 * m20 * m33
+                    - m01 * m30 * m23
+                    - m03 * m20 * m31
+                    + m03 * m30 * m21;
 
-                    let x12 = -m00 * m12 * m33
-                        + m00 * m32 * m13
-                        + m02 * m10 * m33
-                        - m02 * m30 * m13
-                        - m03 * m10 * m32
-                        + m03 * m30 * m12;
+                let x31 = m00 * m21 * m32
+                    - m00 * m31 * m22
+                    - m01 * m20 * m32
+                    + m01 * m30 * m22
+                    + m02 * m20 * m31
+                    - m02 * m30 * m21;
 
-                    let x22 = m00 * m11 * m33
-                        - m00 * m31 * m13
-                        - m01 * m10 * m33
-                        + m01 * m30 * m13
-                        + m03 * m10 * m31
-                        - m03 * m30 * m11;
+                let x02 = m01 * m12 * m33
+                    - m01 * m32 * m13
+                    - m02 * m11 * m33
+                    + m02 * m31 * m13
+                    + m03 * m11 * m32
+                    - m03 * m31 * m12;
 
-                    let x03 = -m01 * m12 * m23
-                        + m01 * m22 * m13
-                        + m02 * m11 * m23
-                        - m02 * m21 * m13
-                        - m03 * m11 * m22
-                        + m03 * m21 * m12;
+                let x12 = -m00 * m12 * m33
+                    + m00 * m32 * m13
+                    + m02 * m10 * m33
+                    - m02 * m30 * m13
+                    - m03 * m10 * m32
+                    + m03 * m30 * m12;
 
-                    let x32 = -m00 * m11 * m32
-                        + m00 * m31 * m12
-                        + m01 * m10 * m32
-                        - m01 * m30 * m12
-                        - m02 * m10 * m31
-                        + m02 * m30 * m11;
+                let x22 = m00 * m11 * m33
+                    - m00 * m31 * m13
+                    - m01 * m10 * m33
+                    + m01 * m30 * m13
+                    + m03 * m10 * m31
+                    - m03 * m30 * m11;
 
-                    let x13 = m00 * m12 * m23
-                        - m00 * m22 * m13
-                        - m02 * m10 * m23
-                        + m02 * m20 * m13
-                        + m03 * m10 * m22
-                        - m03 * m20 * m12;
+                let x03 = -m01 * m12 * m23
+                    + m01 * m22 * m13
+                    + m02 * m11 * m23
+                    - m02 * m21 * m13
+                    - m03 * m11 * m22
+                    + m03 * m21 * m12;
 
-                    let x23 = -m00 * m11 * m23
-                        + m00 * m21 * m13
-                        + m01 * m10 * m23
-                        - m01 * m20 * m13
-                        - m03 * m10 * m21
-                        + m03 * m20 * m11;
+                let x32 = -m00 * m11 * m32
+                    + m00 * m31 * m12
+                    + m01 * m10 * m32
+                    - m01 * m30 * m12
+                    - m02 * m10 * m31
+                    + m02 * m30 * m11;
 
-                    let x33 = m00 * m11 * m22
-                        - m00 * m21 * m12
-                        - m01 * m10 * m22
-                        + m01 * m20 * m12
-                        + m02 * m10 * m21
-                        - m02 * m20 * m11;
+                let x13 = m00 * m12 * m23
+                    - m00 * m22 * m13
+                    - m02 * m10 * m23
+                    + m02 * m20 * m13
+                    + m03 * m10 * m22
+                    - m03 * m20 * m12;
 
-                    Some(array![
-                                [x00 / det, x01 / det, x02 / det, x03 / det],
-                                [x10 / det, x11 / det, x12 / det, x13 / det],
-                                [x20 / det, x21 / det, x22 / det, x23 / det],
-                                [x30 / det, x31 / det, x32 / det, x33 / det]
-                    ])
-                }
-                _ => {
+                let x23 = -m00 * m11 * m23
+                    + m00 * m21 * m13
+                    + m01 * m10 * m23
+                    - m01 * m20 * m13
+                    - m03 * m10 * m21
+                    + m03 * m20 * m11;
+
+                let x33 = m00 * m11 * m22
+                    - m00 * m21 * m12
+                    - m01 * m10 * m22
+                    + m01 * m20 * m12
+                    + m02 * m10 * m21
+                    - m02 * m20 * m11;
+
+                Some(array![
+                            [x00 / det, x01 / det, x02 / det, x03 / det],
+                            [x10 / det, x11 / det, x12 / det, x13 / det],
+                            [x20 / det, x21 / det, x22 / det, x23 / det],
+                            [x30 / det, x31 / det, x32 / det, x33 / det]
+                ])
+            }
+            _ => {
+                if let Some(res) = self.lu_inv() {
+                    Some(res)
+                } else {
+                    let det = self.det();
                     // Fully expanding any more is too clunky!
                     if !det.is_zero() {
                         let mut cofactors: Array2<T> = Array2::zeros((l, l));
@@ -240,8 +265,6 @@ where
                     }
                 }
             }
-        } else {
-            None
         }
     }
 
@@ -282,9 +305,110 @@ where
 
         res
     }
+
+    fn lu(&self) -> Option<(Self, Self, Self)> {
+        fn pivot<T: Float>(A: &Array2<T>) -> Array2<T> {
+            fn swap<T: Float>(A: &mut Array2<T>, ir1: usize, ir2: usize) {
+                let (.., mut rest) = A.view_mut().split_at(Axis(0), ir1);
+                let (r0, mut rest) = rest.view_mut().split_at(Axis(0), 1);
+                let (.., mut rest) = rest.view_mut().split_at(Axis(0), ir2 - ir1 - 1);
+                let (r1, ..) = rest.view_mut().split_at(Axis(0), 1);
+
+                Zip::from(r0).and(r1).for_each(std::mem::swap);
+            }
+
+            let n = A.raw_dim()[0];
+            let mut P: Array2<T> = Array::eye(n);
+
+            for (idx, col) in A.axis_iter(Axis(1)).enumerate() {
+                // find index of maximum value in column i
+                let mut mp = idx;
+                for i in idx .. n {
+                    if col[mp].abs() < col[i].abs() {
+                        mp = i;
+                    }
+                }
+                // swap rows when different
+                if mp != idx {
+                    swap(&mut P, idx, mp);
+                }
+            }
+
+            P
+        }
+
+        let d = self.raw_dim();
+        let n = d[0];
+        assert_eq!(n, d[1], "LU decomposition must take a square matrix.");
+
+        let P = pivot(self);
+        let pA = P.dot(self);
+
+        let mut L: Array2<T> = Array::eye(n);
+        let mut U: Array2<T> = Array::zeros((n, n));
+
+        for c in 0 .. n {
+            for r in 0 .. n {
+                let pAs = pA[[r, c]] - U.slice(s![0..r, c]).dot(&L.slice(s![r, 0..r]));
+
+                if pAs.is_nan() || pAs.is_infinite() {
+                    return None;
+                }
+
+                if r < c + 1 { // U
+                    U[[r, c]] = pAs;
+                } else { // L
+                    L[[r, c]] = (pAs) / U[[c, c]];
+                }
+            }
+        }
+
+        Some((L, U, P))
+    }
+
+    fn lu_inv(&self) -> Option<Self> {
+        fn linv<T: Float>(l: &Array2<T>, n: usize) -> Array2<T> {
+            let mut m: Array2<T> = Array2::zeros((n, n));
+
+            for i in 0 .. n {
+                if l[(i, i)] == T::zero() {
+                    return m;
+                }
+                m[(i, i)] = l[(i, i)].recip();
+
+                for j in 0 .. i {
+                     for k in j .. i {
+                         m[(i, j)] = m[(i, j)] + l[(i, k)] * m[(k, j)];
+                     }
+
+                     m[(i, j)] = -m[(i, j)] / l[(i, i)];
+                }
+            }
+
+            m
+        }
+
+        fn uinv<T: Float>(u: &Array2<T>, n: usize) -> Array2<T> {
+            linv(&u.t().to_owned(), n).t().to_owned()
+        }
+
+        let d = self.raw_dim();
+        let n = d[0];
+
+        assert!(d[0] == d[1]);
+
+        if let Some((l, u, p)) = self.lu() {
+            let lt = linv(&l, n);
+            let ut = uinv(&u, n);
+
+            Some(ut.dot(&lt).dot(&p))
+        } else {
+            None
+        }
+    }
 }
 
-fn determinant<T>(vm: &Vec<T>, l: usize) -> T
+fn determinant<T>(vm: &[T], l: usize) -> T
 where
     T: Copy + Debug + Zero + One + Mul + PartialEq + Sub<Output=T> + Neg<Output=T> + Sum<T>,
 {
@@ -1268,7 +1392,7 @@ where
         {
             // Reuseable result to reduce memory allocations
             let l1 = l - 1;
-            let mut res: Vec<T> = vm.clone(); // same shape/size as vm
+            let mut res: Vec<T> = vm.to_vec(); // same shape/size as vm
             // This is n^3
             (0 .. l)
                 .map(|i| {
@@ -1278,7 +1402,7 @@ where
                             let d = r * l1;
                             let s = (r + 1) * l;
                             for c in 0 .. l1 {
-                                res[d + c] = vm[s + c + if c < i {0} else {1}];
+                                res[d + c] = vm[s + c + usize::from(c >= i)];
                             }
                         }
                         let v = vm[i] * determinant(&res, l1);
@@ -1355,6 +1479,8 @@ mod test_inverse {
         ];
         let inv = a.inv().expect("Sods Law");
         let back = inv.inv();
+        eprintln!("{:?}", to_vec(&inv));
+        // This fails with LU Inverse only
         assert!(compare_vecs(&a, &back.unwrap(), EPS));
         let expected = array![
             [1.25, 0.5, 1.5, 0.5],
@@ -1376,10 +1502,9 @@ mod test_inverse {
         ];
         let inv = a.inv().expect("Sods Law");
         let back = inv.inv().unwrap();
-        // some concern here, precision not ideal
-        eprintln!("{:?}", to_vec(&a));
-        eprintln!("{:?}", to_vec(&back));
-        assert!(compare_vecs(&a, &back, 1e-5));
+        // some concern here, precision might not be ideal (try 1e-5)
+        // Note: Precision is better for LU Inverse and full EPS can be used
+        assert!(compare_vecs(&a, &back, EPS));
         let expected: Array2<f64> = array![
             [-11.98,  15.64,   9.32,  10.34, -19.12],
             [ 33.62, -44.16, -26.08, -28.46,  53.28],
@@ -1424,7 +1549,9 @@ mod test_inverse {
             [3.0, 8.0, 1.0, 4.0, 1.0, 5.0]
         ];
         let inv = a.inv().expect("Sods Law");
+        eprintln!("{:?}", to_vec(&inv));
         let back = inv.inv();
+        // This fails with LU Inverse only
         assert!(compare_vecs(&a, &back.unwrap(), EPS));
         let expected = array![
             [-0.53881418,  0.57793399,  0.6653423 , -0.08374083, -0.16962103,
