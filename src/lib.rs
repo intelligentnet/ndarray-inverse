@@ -6,6 +6,7 @@ use std::fmt::Debug;
 use std::iter::Sum;
 use std::ops::{Mul, Neg, Sub, AddAssign};
 
+
 pub trait Inverse<T: Float> {
     fn det(&self) -> T;
 
@@ -18,6 +19,14 @@ pub trait Inverse<T: Float> {
         Self: Sized;
 
     fn lu_inv(&self) -> Option<Self>
+    where
+        Self: Sized;
+
+    fn inv_lt(&self) -> Option<Self>
+    where
+        Self: Sized;
+
+    fn inv_ut(&self) -> Option<Self>
     where
         Self: Sized;
 
@@ -43,7 +52,6 @@ where
     }
 
     fn inv(&self) -> Option<Self> {
-        // Seems faster if not inlined!
         fn submat<T: Float>(res: &mut [T], m: &Array2<T>, sr: usize, sc: usize) {
             let s = m.raw_dim();
             let mut i: usize = 0;
@@ -308,15 +316,6 @@ where
 
     fn lu(&self) -> Option<(Self, Self, Self)> {
         fn pivot<T: Float>(A: &Array2<T>) -> Array2<T> {
-            fn swap<T: Float>(A: &mut Array2<T>, ir1: usize, ir2: usize) {
-                let (.., mut rest) = A.view_mut().split_at(Axis(0), ir1);
-                let (r0, mut rest) = rest.view_mut().split_at(Axis(0), 1);
-                let (.., mut rest) = rest.view_mut().split_at(Axis(0), ir2 - ir1 - 1);
-                let (r1, ..) = rest.view_mut().split_at(Axis(0), 1);
-
-                Zip::from(r0).and(r1).for_each(std::mem::swap);
-            }
-
             let n = A.raw_dim()[0];
             let mut P: Array2<T> = Array::eye(n);
 
@@ -330,7 +329,9 @@ where
                 }
                 // swap rows when different
                 if mp != idx {
-                    swap(&mut P, idx, mp);
+                    let (l, r) = P.multi_slice_mut((s![idx, ..], s![mp, ..]));
+
+                    Zip::from(l).and(r).for_each(std::mem::swap);
                 }
             }
 
@@ -349,11 +350,13 @@ where
 
         for c in 0 .. n {
             for r in 0 .. n {
-                let pAs = pA[[r, c]] - U.slice(s![0..r, c]).dot(&L.slice(s![r, 0..r]));
+                let s = U.slice(s![0..r, c]).dot(&L.slice(s![r, 0..r]));
 
-                if pAs.is_nan() || pAs.is_infinite() {
+                if s.is_nan() || s.is_infinite() {
                     return None;
                 }
+
+                let pAs = pA[[r, c]] - s;
 
                 if r < c + 1 { // U
                     U[[r, c]] = pAs;
@@ -367,31 +370,6 @@ where
     }
 
     fn lu_inv(&self) -> Option<Self> {
-        fn linv<T: Float>(l: &Array2<T>, n: usize) -> Array2<T> {
-            let mut m: Array2<T> = Array2::zeros((n, n));
-
-            for i in 0 .. n {
-                if l[(i, i)] == T::zero() {
-                    return m;
-                }
-                m[(i, i)] = l[(i, i)].recip();
-
-                for j in 0 .. i {
-                     for k in j .. i {
-                         m[(i, j)] = m[(i, j)] + l[(i, k)] * m[(k, j)];
-                     }
-
-                     m[(i, j)] = -m[(i, j)] / l[(i, i)];
-                }
-            }
-
-            m
-        }
-
-        fn uinv<T: Float>(u: &Array2<T>, n: usize) -> Array2<T> {
-            linv(&u.t().to_owned(), n).t().to_owned()
-        }
-
         let d = self.raw_dim();
         let n = d[0];
 
@@ -404,6 +382,26 @@ where
             Some(ut.dot(&lt).dot(&p))
         } else {
             None
+        }
+    }
+
+    fn inv_lt(&self) -> Option<Self> {
+        let n = check_diag(self);
+
+        if n == 0 {
+            None
+        } else {
+            Some(linv(self, n))
+        }
+    }
+
+    fn inv_ut(&self) -> Option<Self> {
+        let n = check_diag(self);
+
+        if n == 0 {
+            None
+        } else {
+            Some(uinv(self, n))
         }
     }
 }
@@ -1416,6 +1414,41 @@ where
     }
 }
 
+fn check_diag<T: Float>(m: &Array2<T>) -> usize {
+    let d = m.raw_dim();
+    assert!(d[0] == d[1]);
+
+    for i in 0 .. d[0] {
+        if m[(i, i)].is_zero() {
+            return 0;
+        }
+    }
+
+    d[0]
+}
+
+fn linv<T: Float>(l: &Array2<T>, n: usize) -> Array2<T> {
+    let mut m: Array2<T> = Array2::zeros((n, n));
+
+    for i in 0 .. n {
+        m[(i, i)] = l[(i, i)].recip();
+
+        for j in 0 .. i {
+            for k in j .. i {
+                m[(i, j)] = m[(i, j)] + l[(i, k)] * m[(k, j)];
+            }
+
+            m[(i, j)] = -m[(i, j)] * m[(i, i)];
+        }
+    }
+
+    m
+}
+
+fn uinv<T: Float>(u: &Array2<T>, n: usize) -> Array2<T> {
+    linv(&u.t().to_owned(), n).t().to_owned()
+}
+
 #[cfg(test)]
 mod test_inverse {
     use ndarray::prelude::*;
@@ -1670,5 +1703,28 @@ mod test_inverse {
             [9.899494936611667, 1.624553864213788, 1.8497110052313648, 1.3926212476456026]];
 
         assert!(compare_vecs(&res, &expected, EPS));
+
+        let a = array![[2.0, 0.1], [0.1, 3.0]];
+
+        let res = a.cholesky().t().to_owned();
+
+        let expected = array![[1.41421356, 0.07071068], [0.0, 1.73060683]];
+
+        assert!(compare_vecs(&res, &expected, EPS));
+
+        let expected_sq = array![[2.005, 0.12237238], [0.12237238, 2.995]];
+
+        assert!(compare_vecs(&res.dot(&res.t()), &expected_sq, EPS));
+    }
+
+    #[test]
+    fn test_triangular() {
+        let a = array![[4.242640687119285, 0.0, 0.0, 0.0],
+            [5.185449728701349, 6.565905201197403, 0.0, 0.0],
+            [12.727922061357857, 3.0460384954008553, 1.6497422479090704, 0.0],
+            [9.899494936611667, 1.624553864213788, 1.8497110052313648, 1.3926212476456026]];
+
+        assert!(compare_vecs(&a.inv().unwrap(), &a.inv_lt().unwrap(), EPS));
+        assert!(compare_vecs(&a.t().to_owned().inv().unwrap(), &a.t().to_owned().inv_ut().unwrap(), EPS));
     }
 }
