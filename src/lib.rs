@@ -6,7 +6,6 @@ use std::fmt::Debug;
 use std::iter::Sum;
 use std::ops::{Mul, Neg, Sub, AddAssign};
 
-
 pub trait Inverse<T: Float> {
     fn det(&self) -> T;
 
@@ -1459,7 +1458,7 @@ mod test_inverse {
     const EPS: f64 = 1e-8;
 
     fn to_vec<T: Float>(m: &Array2<T>) -> Vec<T> {
-        m.indexed_iter().map(|(_, &e)| e).collect()
+        m.iter().map(|&e| e).collect()
     }
 
     /// utility function to compare vectors of Floats

@@ -25,3 +25,9 @@ opt-level = 3
 #lto = true
 #panic = "abort"
 
+[dev-dependencies]
+criterion = { version = "0.4", features = ["html_reports"] }
+
+[[bench]]
+name = "inv"
+harness = false
