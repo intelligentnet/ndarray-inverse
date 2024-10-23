@@ -13,7 +13,7 @@ categories = ["mathematics", "science"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ndarray = "^0.15"
+ndarray = "^0"
 #ndarray-linalg = { version = "*", features = ["openblas"] }
 #ndarray-linalg = { version = "*", features = ["netlib"] }
 num-traits = "0.2"
