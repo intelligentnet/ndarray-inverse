@@ -16,7 +16,7 @@ categories = ["mathematics", "science"]
 ndarray = "^0"
 #ndarray-linalg = { version = "*", features = ["openblas"] }
 #ndarray-linalg = { version = "*", features = ["netlib"] }
-num-traits = "0.2"
+num-traits = "^0.2"
 
 [profile.release]
 #strip = true
@@ -26,8 +26,8 @@ opt-level = 3
 #panic = "abort"
 
 [dev-dependencies]
-criterion = { version = "0.4", features = ["html_reports"] }
+criterion = { version = "^0.4", features = ["html_reports"] }
 
-[[bench]]
-name = "inv"
-harness = false
+#[[bench]]
+#name = "inv"
+#harness = false
